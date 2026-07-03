@@ -100,7 +100,18 @@ const isValid = reactive({
     retryDelay: true,
     retryDelayMultiplier: true
 })
-const serviceType = computed(() => settingsStore.getSetting(SETTINGS.SERVICE_TYPE))
+const serviceType = computed(() => {
+    const raw = (settingsStore.getSetting(SETTINGS.SERVICE_TYPE) as string) ?? ''
+    try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+            return parsed[0] ?? ''
+        }
+    } catch {
+        // legacy plain-string format
+    }
+    return raw
+})
 
 const useBatchTranslation = computed({
     get: (): string => settingsStore.getSetting(SETTINGS.USE_BATCH_TRANSLATION) as string,
