@@ -347,59 +347,38 @@ public class GoogleGeminiService : BaseLanguageService, ITranslationService, IBa
         CancellationToken cancellationToken)
     {
         var endpoint = $"{_endpoint}/models/{_model}:generateContent?key={_apiKey}";
-        var requestBody = new Dictionary<string, object>
+        var generationConfig = new Dictionary<string, object>
         {
-            ["systemInstruction"] = new
+            ["response_mime_type"] = "application/json",
+            ["response_schema"] = new
             {
-                parts = new[]
+                type = "array",
+                items = new
                 {
-                    new
+                    type = "object",
+                    properties = new
                     {
-                        text = _prompt
-                    }
-                }
-            },
-            ["contents"] = new[]
-            {
-                new
-                {
-                    parts = new[]
-                    {
-                        new
+                        position = new
                         {
-                            text = JsonSerializer.Serialize(subtitleBatch)
-                        }
-                    }
-                }
-            },
-            ["generationConfig"] = new Dictionary<string, object>
-            {
-                ["response_mime_type"] = "application/json",
-                ["response_schema"] = new
-                {
-                    type = "array",
-                    items = new
-                    {
-                        type = "object",
-                        properties = new
-                        {
-                            position = new
-                            {
-                                type = "integer"
-                            },
-                            line = new
-                            {
-                                type = "string"
-                            }
+                            type = "integer"
                         },
-                        required = new[] { "position", "line" }
-                    }
+                        line = new
+                        {
+                            type = "string"
+                        }
+                    },
+                    required = new[] { "position", "line" }
                 }
             }
         };
 
+        var placeholders = BuildRequestPlaceholders(_model!, _prompt!, JsonSerializer.Serialize(subtitleBatch));
+        var requestBody = _requestTemplateService.BuildRequestBody(
+            _requestTemplate!, placeholders,
+            new Dictionary<string, object?> { ["generationConfig"] = generationConfig });
+
         var content = new StringContent(
-            JsonSerializer.Serialize(requestBody),
+            requestBody,
             Encoding.UTF8,
             "application/json");
 

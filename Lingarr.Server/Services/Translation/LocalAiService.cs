@@ -306,29 +306,13 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
             }
         };
 
-        var messages = new[]
-        {
-            new Dictionary<string, string>
-            {
-                ["role"] = "system",
-                ["content"] = _prompt!
-            },
-            new Dictionary<string, string>
-            {
-                ["role"] = "user",
-                ["content"] = JsonSerializer.Serialize(subtitleBatch)
-            }
-        };
-
-        var requestBody = new Dictionary<string, object>
-        {
-            ["model"] = _model!,
-            ["messages"] = messages,
-            ["response_format"] = responseFormat
-        };
+        var placeholders = BuildRequestPlaceholders(_model!, _prompt!, JsonSerializer.Serialize(subtitleBatch));
+        var requestBody = _requestTemplateService.BuildRequestBody(
+            _chatRequestTemplate!, placeholders,
+            new Dictionary<string, object?> { ["response_format"] = responseFormat });
 
         var requestContent = new StringContent(
-            JsonSerializer.Serialize(requestBody),
+            requestBody,
             Encoding.UTF8,
             "application/json");
 
@@ -383,28 +367,11 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
         List<BatchSubtitleItem> subtitleBatch,
         CancellationToken cancellationToken)
     {
-        var messages = new[]
-        {
-            new Dictionary<string, string>
-            {
-                ["role"] = "system",
-                ["content"] = _prompt!
-            },
-            new Dictionary<string, string>
-            {
-                ["role"] = "user",
-                ["content"] = JsonSerializer.Serialize(subtitleBatch)
-            }
-        };
-
-        var requestBody = new Dictionary<string, object>
-        {
-            ["model"] = _model!,
-            ["messages"] = messages
-        };
+        var placeholders = BuildRequestPlaceholders(_model!, _prompt!, JsonSerializer.Serialize(subtitleBatch));
+        var requestBody = _requestTemplateService.BuildRequestBody(_chatRequestTemplate!, placeholders);
 
         var requestContent = new StringContent(
-            JsonSerializer.Serialize(requestBody),
+            requestBody,
             Encoding.UTF8,
             "application/json");
 
@@ -463,16 +430,14 @@ public class LocalAiService : BaseLanguageService, ITranslationService, IBatchTr
         List<BatchSubtitleItem> subtitleBatch,
         CancellationToken cancellationToken)
     {
-        var batchPrompt = _prompt +
-                          "\n\nPlease return the response as a JSON array with objects containing 'position' and 'line' fields. Example: [{\"position\": 1, \"line\": \"translated text\"}]\n\n";
+        var batchInstruction =
+            "\n\nPlease return the response as a JSON array with objects containing 'position' and 'line' fields. Example: [{\"position\": 1, \"line\": \"translated text\"}]\n\n";
 
-        var requestData = new Dictionary<string, object>
-        {
-            ["model"] = _model!,
-            ["prompt"] = batchPrompt + JsonSerializer.Serialize(subtitleBatch),
-            ["stream"] = false
-        };
-        var content = new StringContent(JsonSerializer.Serialize(requestData),
+        var placeholders = BuildRequestPlaceholders(
+            _model!, _prompt!, batchInstruction + JsonSerializer.Serialize(subtitleBatch));
+        var requestBody = _requestTemplateService.BuildRequestBody(_generateRequestTemplate!, placeholders);
+
+        var content = new StringContent(requestBody,
             Encoding.UTF8, "application/json");
 
         var response = await _httpClient.PostAsync(_endpoint, content, cancellationToken);

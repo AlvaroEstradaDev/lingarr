@@ -517,6 +517,46 @@ public class GoogleGeminiServiceTests
         Assert.Equal("Our love.\nIt is beautiful.", result[89]);
     }
 
+    [Fact]
+    public async Task TranslateBatchAsync_PreservesUserGenerationConfig_AndInjectsDefault()
+    {
+        var customTemplate =
+            "{\"systemInstruction\":{\"parts\":[{\"text\":\"{systemPrompt}\"}]}," +
+            "\"contents\":[{\"parts\":[{\"text\":\"{userMessage}\"}]}]," +
+            "\"generationConfig\":{\"temperature\":0.7}}";
+
+        var settings = GetDefaultSettings();
+        settings[SettingKeys.Translation.Gemini.RequestTemplate] = customTemplate;
+        _settingsMock.Setup(s => s.GetSettings(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(settings);
+
+        var batch = new List<BatchSubtitleItem> { new() { Position = 1, Line = "hello" } };
+
+        var respJson = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"[{\\\"position\\\":1,\\\"line\\\":\\\"hola\\\"}]\"}]}}]}";
+        string? captured = null;
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) =>
+                captured = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(respJson, Encoding.UTF8, "application/json")
+            });
+
+        await _service.TranslateBatchAsync(batch, "en", "es", CancellationToken.None);
+
+        Assert.NotNull(captured);
+        using var doc = JsonDocument.Parse(captured!);
+        var root = doc.RootElement;
+        Assert.True(root.TryGetProperty("systemInstruction", out _));
+        Assert.True(root.TryGetProperty("contents", out _));
+        Assert.True(root.TryGetProperty("generationConfig", out var gc));
+        Assert.Equal(0.7, gc.GetProperty("temperature").GetDouble());
+        Assert.False(gc.TryGetProperty("response_schema", out _));
+    }
+
     // Helper to keep the tests clean
     private Dictionary<string, string> GetDefaultSettings()
     {

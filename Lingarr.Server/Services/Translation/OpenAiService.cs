@@ -303,27 +303,13 @@ public class OpenAiService : BaseLanguageService, ITranslationService, IBatchTra
             }
         };
 
-        var requestBody = new Dictionary<string, object>
-        {
-            ["model"] = _model!,
-            ["messages"] = new[]
-            {
-                new Dictionary<string, string>
-                {
-                    ["role"] = "system",
-                    ["content"] = _prompt!
-                },
-                new Dictionary<string, string>
-                {
-                    ["role"] = "user",
-                    ["content"] = JsonSerializer.Serialize(subtitleBatch)
-                }
-            },
-            ["response_format"] = responseFormat
-        };
+        var placeholders = BuildRequestPlaceholders(_model!, _prompt!, JsonSerializer.Serialize(subtitleBatch));
+        var requestBody = _requestTemplateService.BuildRequestBody(
+            _requestTemplate!, placeholders,
+            new Dictionary<string, object?> { ["response_format"] = responseFormat });
 
         var requestContent = new StringContent(
-            JsonSerializer.Serialize(requestBody),
+            requestBody,
             Encoding.UTF8,
             "application/json");
 

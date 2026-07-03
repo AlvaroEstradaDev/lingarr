@@ -296,20 +296,15 @@ public class AnthropicService : BaseLanguageService, ITranslationService, IBatch
         List<BatchSubtitleItem> subtitleBatch,
         CancellationToken cancellationToken)
     {
-        var requestBody = new Dictionary<string, object>
+        var tools = new[]
         {
-            ["model"] = _model!,
-            ["max_tokens"] = 1024,
-            ["system"] = _prompt!,
-            ["tools"] = new[]
+            new
             {
-                new
+                name = "record_translation_batch",
+                description = "Record batch translation results using well-structured JSON.",
+                input_schema = new
                 {
-                    name = "record_translation_batch",
-                    description = "Record batch translation results using well-structured JSON.",
-                    input_schema = new
-                    {
-                        type = "object",
+                    type = "object",
                     properties = new Dictionary<string, object>
                     {
                         ["translations"] = new
@@ -337,26 +332,27 @@ public class AnthropicService : BaseLanguageService, ITranslationService, IBatch
                         }
                     },
                     required = new[] { "translations" }
-                    }
-                }
-            },
-            ["tool_choice"] = new
-            {
-                type = "tool",
-                name = "record_translation_batch"
-            },
-            ["messages"] = new[]
-            {
-                new
-                {
-                    role = "user",
-                    content = JsonSerializer.Serialize(subtitleBatch)
                 }
             }
         };
+        var toolChoice = new
+        {
+            type = "tool",
+            name = "record_translation_batch"
+        };
+
+        var placeholders = BuildRequestPlaceholders(_model!, _prompt!, JsonSerializer.Serialize(subtitleBatch));
+
+        var requestBody = _requestTemplateService.BuildRequestBody(
+            _requestTemplate!, placeholders,
+            new Dictionary<string, object?>
+            {
+                ["tools"] = tools,
+                ["tool_choice"] = toolChoice
+            });
 
         var content = new StringContent(
-            JsonSerializer.Serialize(requestBody),
+            requestBody,
             Encoding.UTF8,
             "application/json");
 
