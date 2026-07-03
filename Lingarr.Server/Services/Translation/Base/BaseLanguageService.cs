@@ -46,8 +46,8 @@ public abstract class BaseLanguageService : BaseTranslationService
     }
 
     protected string ApplyContextIfEnabled(
-        string text, 
-        List<string>? contextLinesBefore, 
+        string text,
+        List<string>? contextLinesBefore,
         List<string>? contextLinesAfter)
     {
         if (_contextPromptEnabled != "true" || string.IsNullOrEmpty(_contextPrompt))
@@ -60,6 +60,16 @@ public abstract class BaseLanguageService : BaseTranslationService
         _replacements["contextAfter"] = string.Join("\n", contextLinesAfter ?? []);
         return ReplacePlaceholders(_contextPrompt, _replacements);
     }
+
+    protected Dictionary<string, string> BuildRequestPlaceholders(
+        string model, string systemPrompt, string userMessage) => new()
+    {
+        ["model"] = model,
+        ["systemPrompt"] = systemPrompt,
+        ["userMessage"] = userMessage,
+        ["sourceLanguage"] = _replacements["sourceLanguage"],
+        ["targetLanguage"] = _replacements["targetLanguage"]
+    };
 
     /// <inheritdoc />
     public override Task<LanguagePair?> GetLanguagePair(

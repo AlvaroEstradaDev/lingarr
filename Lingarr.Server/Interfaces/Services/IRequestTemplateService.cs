@@ -27,4 +27,19 @@ public interface IRequestTemplateService
     /// <returns>A valid JSON string with all placeholders replaced.</returns>
     /// <exception cref="System.Text.Json.JsonException">Thrown when the resulting string is not valid JSON.</exception>
     string BuildRequestBody(string template, Dictionary<string, string> placeholders);
+
+    /// <summary>
+    /// Replaces placeholders in a JSON template, then additively merges extra fields at the
+    /// top level. A key from <paramref name="extraFields"/> is written ONLY if absent from the
+    /// template-produced JSON — user template values always take priority.
+    /// </summary>
+    /// <param name="template">A JSON template string containing placeholders such as {model}, {systemPrompt}, and {userMessage}.</param>
+    /// <param name="placeholders">A dictionary mapping placeholder names to their replacement values.</param>
+    /// <param name="extraFields">Optional top-level fields to add when the template does not already define them.</param>
+    /// <returns>A valid JSON string with placeholders replaced and absent extra fields added.</returns>
+    /// <exception cref="System.Text.Json.JsonException">Thrown when the resulting string is not valid JSON.</exception>
+    string BuildRequestBody(
+        string template,
+        Dictionary<string, string> placeholders,
+        Dictionary<string, object?>? extraFields = null);
 }

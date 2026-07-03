@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lingarr.Core.Configuration;
 using Lingarr.Server.Interfaces.Services;
 using Lingarr.Server.Models.RequestTemplates;
@@ -45,6 +46,13 @@ public class RequestTemplateService : IRequestTemplateService
 
     /// <inheritdoc />
     public string BuildRequestBody(string template, Dictionary<string, string> placeholders)
+        => BuildRequestBody(template, placeholders, null);
+
+    /// <inheritdoc />
+    public string BuildRequestBody(
+        string template,
+        Dictionary<string, string> placeholders,
+        Dictionary<string, object?>? extraFields = null)
     {
         var result = placeholders.Aggregate(template, (current, placeholder) =>
         {
@@ -54,7 +62,19 @@ public class RequestTemplateService : IRequestTemplateService
             );
         });
 
-        using var doc = JsonDocument.Parse(result);
-        return result;
+        if (extraFields is null || extraFields.Count == 0)
+        {
+            using var doc = JsonDocument.Parse(result);
+            return result;
+        }
+
+        var node = JsonNode.Parse(result)?.AsObject()
+                   ?? throw new JsonException("Request template did not produce a JSON object.");
+        foreach (var (key, value) in extraFields)
+        {
+            if (node.ContainsKey(key)) continue;
+            node[key] = value is null ? null : JsonNode.Parse(JsonSerializer.Serialize(value));
+        }
+        return node.ToJsonString();
     }
 }
