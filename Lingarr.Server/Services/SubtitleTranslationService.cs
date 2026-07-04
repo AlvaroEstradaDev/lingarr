@@ -409,6 +409,19 @@ public class SubtitleTranslationService
         throw new TranslationException("All configured batch translation services failed.", lastError);
     }
 
+    private const int BatchRetrySize = 2;
+
+    /// <summary>
+    /// Runs the batched translation pass for a set of subtitles and fills any gaps
+    /// left by the model via a graduated fallback chain:
+    /// <list type="number">
+    /// <item><description>Initial batch pass over all positions at the configured batch size.</description></item>
+    /// <item><description>Retry of the still-missing positions in chunks of <see cref="BatchRetrySize"/> (= 2):
+    /// small enough to avoid model output truncation, still batched for efficiency.</description></item>
+    /// <item><description>Per-position single-line translation for anything still missing.</description></item>
+    /// <item><description>Keep the original line only when single-line translation throws.</description></item>
+    /// </list>
+    /// </summary>
     private async Task RunBatch(
         TranslationCandidate candidate,
         List<SubtitleItem> toTranslate,
@@ -417,29 +430,61 @@ public class SubtitleTranslationService
         CancellationToken cancellationToken)
     {
         var lineSeparator = preserveLineBreaks ? "\n" : " ";
-        var batchItems = toTranslate.Select(subtitle =>
-        {
-            var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
-            return new BatchSubtitleItem
-            {
-                Position = subtitle.Position,
-                Line = string.Join(lineSeparator, contentLines)
-            };
-        }).ToList();
 
-        var batchResults = await candidate.Entry.BatchService!.TranslateBatchAsync(
-            batchItems,
-            candidate.Pair.Source,
-            candidate.Pair.Target,
-            cancellationToken);
+        var results = await ExecuteBatch(
+            candidate, toTranslate, lineSeparator, stripSubtitleFormatting, cancellationToken);
+
+        if (results.Count < toTranslate.Count)
+        {
+            var missing = toTranslate.Where(s => !results.ContainsKey(s.Position)).ToList();
+            var totalChunks = (missing.Count + BatchRetrySize - 1) / BatchRetrySize;
+            _logger.LogWarning(
+                "Batch omitted {Missing}/{Total} positions; retrying in batches of {RetrySize}.",
+                missing.Count, toTranslate.Count, BatchRetrySize);
+            // BatchRetrySize = 2: small enough to avoid model output truncation while still
+            // batching for efficiency. Each chunk sits in its own try/catch so one failure
+            // cannot discard results recovered by sibling chunks.
+            var recoveredInRetry = 0;
+            for (var i = 0; i < missing.Count; i += BatchRetrySize)
+            {
+                var chunkIndex = (i / BatchRetrySize) + 1;
+                var chunk = missing.Skip(i).Take(BatchRetrySize).ToList();
+                _logger.LogInformation(
+                    "Retrying batch chunk {Index}/{TotalChunks} with {Size} position(s).",
+                    chunkIndex, totalChunks, chunk.Count);
+                try
+                {
+                    var retryResults = await ExecuteBatch(
+                        candidate, chunk, lineSeparator, stripSubtitleFormatting, cancellationToken);
+                    var recovered = retryResults.Count(kvp => !results.ContainsKey(kvp.Key));
+                    foreach (var (position, line) in retryResults)
+                    {
+                        results[position] = line;
+                    }
+                    recoveredInRetry += recovered;
+                    _logger.LogInformation(
+                        "Retry chunk {Index} recovered {Recovered}/{Size} position(s).",
+                        chunkIndex, recovered, chunk.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Retry batch of {Size} failed; remaining positions will use single-line fallback.",
+                        chunk.Count);
+                }
+            }
+            _logger.LogInformation(
+                "Retry pass complete: recovered {Recovered} of {Missing} missing position(s); {StillMissing} remain.",
+                recoveredInRetry, missing.Count, missing.Count - recoveredInRetry);
+        }
 
         foreach (var subtitle in toTranslate)
         {
             var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
-            if (!batchResults.TryGetValue(subtitle.Position, out var translated))
+            if (!results.TryGetValue(subtitle.Position, out var translated))
             {
                 _logger.LogWarning(
-                    "Batch omitted position {Position}; falling back to single-line translation.",
+                    "Position {Position} still missing after retry; falling back to single-line translation.",
                     subtitle.Position);
                 try
                 {
@@ -474,6 +519,35 @@ public class SubtitleTranslationService
                 subtitle.Position);
             _translationByPosition[subtitle.Position] = (candidate.Entry.Name, candidate.Pair);
         }
+    }
+
+    /// <summary>
+    /// Single batch-call helper shared by the initial pass in <see cref="RunBatch"/> and by every
+    /// retry chunk: builds <see cref="BatchSubtitleItem"/>s for the given subtitles and invokes the
+    /// configured batch translation service once.
+    /// </summary>
+    private static async Task<Dictionary<int, string>> ExecuteBatch(
+        TranslationCandidate candidate,
+        List<SubtitleItem> subtitles,
+        string lineSeparator,
+        bool stripSubtitleFormatting,
+        CancellationToken cancellationToken)
+    {
+        var batchItems = subtitles.Select(subtitle =>
+        {
+            var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
+            return new BatchSubtitleItem
+            {
+                Position = subtitle.Position,
+                Line = string.Join(lineSeparator, contentLines)
+            };
+        }).ToList();
+
+        return await candidate.Entry.BatchService!.TranslateBatchAsync(
+            batchItems,
+            candidate.Pair.Source,
+            candidate.Pair.Target,
+            cancellationToken);
     }
 
     /// <summary>

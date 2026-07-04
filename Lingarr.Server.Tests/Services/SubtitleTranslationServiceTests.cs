@@ -507,9 +507,49 @@ public class SubtitleTranslationServiceTests
     }
 
     [Fact]
-    public async Task ProcessSubtitleBatch_MissingPosition_FallsBackToSingleLineTranslation()
+    public async Task ProcessSubtitleBatch_MissingPositions_RetriesInSmallerBatchesOfTwo()
     {
-        // Arrange - batch omits position 2 (truncation); single-line must translate it
+        // Arrange - initial batch omits the tail; retry batches (<=2) return everything
+        var batchCallSizes = new List<int>();
+        var singleLineCalls = new List<string>();
+        var harness = CreateBatchHarness(
+            items =>
+            {
+                batchCallSizes.Add(items.Count);
+                return items.Count > BatchRetrySize
+                    ? items.Take(2).ToDictionary(i => i.Position, _ => "tr")
+                    : items.ToDictionary(i => i.Position, _ => "tr");
+            },
+            singleLine: text =>
+            {
+                singleLineCalls.Add(text);
+                return "single:" + text;
+            });
+        var subtitles = new List<SubtitleItem>
+        {
+            Subtitle(1, "a"), Subtitle(2, "b"), Subtitle(3, "c"), Subtitle(4, "d")
+        };
+
+        // Act
+        await harness.Service.ProcessSubtitleBatch(subtitles,
+            "en", "es",
+            stripSubtitleFormatting: false,
+            preserveLineBreaks: false,
+            CancellationToken.None);
+
+        // Assert - initial batch over all 4, then a retry batch of size <= 2
+        Assert.Equal(4, batchCallSizes[0]);
+        Assert.Contains(batchCallSizes.Skip(1), size => size <= 2);
+        Assert.All(subtitles, s => Assert.Equal(["tr"], s.TranslatedLines));
+        Assert.Empty(singleLineCalls); // retry resolved everything, single-line not needed
+    }
+
+    private const int BatchRetrySize = 2;
+
+    [Fact]
+    public async Task ProcessSubtitleBatch_StillMissingAfterRetry_FallsBackToSingleLine()
+    {
+        // Arrange - retry batch also omits position 2; single-line must translate it
         var harness = CreateBatchHarness(
             items => items.Where(i => i.Position == 1).ToDictionary(i => i.Position, _ => "hola"),
             singleLine: text => $"single:{text}");
