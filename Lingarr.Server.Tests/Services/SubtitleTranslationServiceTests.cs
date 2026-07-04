@@ -96,7 +96,9 @@ public class SubtitleTranslationServiceTests
         };
     }
 
-    private static BatchHarness CreateBatchHarness(Func<List<BatchSubtitleItem>, Dictionary<int, string>> batchTranslate)
+    private static BatchHarness CreateBatchHarness(
+        Func<List<BatchSubtitleItem>, Dictionary<int, string>> batchTranslate,
+        Func<string, string>? singleLine = null)
     {
         var translationServiceMock = new Mock<ITranslationService>();
         translationServiceMock
@@ -105,6 +107,18 @@ public class SubtitleTranslationServiceTests
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((string source, string target, CancellationToken _) => new LanguagePair { Source = source, Target = target, Tier = MatchTier.Exact });
+        if (singleLine is not null)
+        {
+            translationServiceMock
+                .Setup(t => t.TranslateAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string text, string _, string _, List<string>? _, List<string>? _, CancellationToken _) => singleLine(text));
+        }
         var batchTranslationServiceMock = new Mock<IBatchTranslationService>();
         batchTranslationServiceMock
             .Setup(b => b.TranslateBatchAsync(
@@ -493,10 +507,37 @@ public class SubtitleTranslationServiceTests
     }
 
     [Fact]
-    public async Task ProcessSubtitleBatch_MissingTranslation_FallsBackToOriginalLines()
+    public async Task ProcessSubtitleBatch_MissingPosition_FallsBackToSingleLineTranslation()
     {
-        // Arrange
-        var harness = CreateBatchHarness(_ => new Dictionary<int, string>());
+        // Arrange - batch omits position 2 (truncation); single-line must translate it
+        var harness = CreateBatchHarness(
+            items => items.Where(i => i.Position == 1).ToDictionary(i => i.Position, _ => "hola"),
+            singleLine: text => $"single:{text}");
+        var subtitles = new List<SubtitleItem>
+        {
+            Subtitle(1, "hello"),
+            Subtitle(2, "world")
+        };
+
+        // Act
+        await harness.Service.ProcessSubtitleBatch(subtitles,
+            "en", "es",
+            stripSubtitleFormatting: false,
+            preserveLineBreaks: false,
+            CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["hola"], subtitles[0].TranslatedLines);
+        Assert.Equal(["single:world"], subtitles[1].TranslatedLines);
+    }
+
+    [Fact]
+    public async Task ProcessSubtitleBatch_MissingTranslation_AndSingleLineFails_KeepsOriginalLines()
+    {
+        // Arrange - batch returns nothing AND single-line throws; keep the original line
+        var harness = CreateBatchHarness(
+            _ => new Dictionary<int, string>(),
+            singleLine: _ => throw new TranslationException("boom"));
         var subtitles = new List<SubtitleItem> { Subtitle(1, "hello", "world") };
 
         // Act

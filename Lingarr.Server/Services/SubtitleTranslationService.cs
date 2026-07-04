@@ -438,9 +438,27 @@ public class SubtitleTranslationService
             var contentLines = stripSubtitleFormatting ? subtitle.PlaintextLines : subtitle.Lines;
             if (!batchResults.TryGetValue(subtitle.Position, out var translated))
             {
-                _logger.LogWarning("Translation not found for subtitle at position {Position} using original line.", subtitle.Position);
-                subtitle.TranslatedLines = contentLines;
-                continue;
+                _logger.LogWarning(
+                    "Batch omitted position {Position}; falling back to single-line translation.",
+                    subtitle.Position);
+                try
+                {
+                    translated = await candidate.Entry.Service.TranslateAsync(
+                        string.Join(lineSeparator, contentLines),
+                        candidate.Pair.Source,
+                        candidate.Pair.Target,
+                        null,
+                        null,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Single-line fallback failed for position {Position}; keeping original line.",
+                        subtitle.Position);
+                    subtitle.TranslatedLines = contentLines;
+                    continue;
+                }
             }
 
             if (stripSubtitleFormatting)
