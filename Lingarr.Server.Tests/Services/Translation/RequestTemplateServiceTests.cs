@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text.Json;
+using Lingarr.Core.Configuration;
 using Lingarr.Server.Services.Translation;
 using Xunit;
 
@@ -62,6 +63,21 @@ public class RequestTemplateServiceTests
 
         using var doc = JsonDocument.Parse(result);
         Assert.Equal("json_schema", doc.RootElement.GetProperty("response_format").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public void GetDefaultTemplate_LocalAiChat_HasQwenThinkingDefaults()
+    {
+        var json = _svc.GetDefaultTemplate(SettingKeys.Translation.LocalAi.ChatRequestTemplate);
+        Assert.NotNull(json);
+
+        using var doc = JsonDocument.Parse(json!);
+        var root = doc.RootElement;
+        Assert.Equal(4096, root.GetProperty("max_tokens").GetInt32());
+        Assert.Equal(1024, root.GetProperty("reasoning_budget_tokens").GetInt32());
+        var kwargs = root.GetProperty("chat_template_kwargs");
+        Assert.True(kwargs.GetProperty("enable_thinking").GetBoolean());
+        Assert.Equal(1024, kwargs.GetProperty("thinking_budget").GetInt32());
     }
 
     [Fact]
